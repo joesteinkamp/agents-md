@@ -29,8 +29,8 @@ The script copies:
 - `.agents/`
 
 After install, edit `AGENTS.md` in the target project to:
-1. Add it under "Enabled optional rules" if you want any of `.agents/rules/optional/*` to apply.
-2. Add project-specific etiquette to the baseline section.
+1. Add entries under "Enabled optional rules" if you want any of `.agents/rules/optional/*` to apply.
+2. Append project-specific rules to the always-on section, or drop new files into `.agents/rules/` for glob-scoped rules.
 
 ## Layout
 
@@ -42,9 +42,6 @@ CLAUDE.md                       # pointer to AGENTS.md
 .agents/
 ├── README.md                   # schema for adding rules and skills
 ├── rules/                      # passive constraints applied while editing
-│   ├── git.md
-│   ├── security.md
-│   ├── testing.md
 │   └── optional/               # opt-in only
 │       ├── frontend-react.md
 │       └── testing-js.md

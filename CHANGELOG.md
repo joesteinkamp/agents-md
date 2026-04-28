@@ -4,6 +4,13 @@ All notable changes to this kit will be documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- Always-on baselines (`git`, `security`, `testing`) inlined into `AGENTS.md` so the entry point carries the universal rules directly. `.agents/rules/` is now reserved for glob-scoped and opt-in rules.
+
+### Removed
+- `.agents/rules/git.md`, `.agents/rules/security.md`, `.agents/rules/testing.md` — superseded by the inlined sections in `AGENTS.md`.
+- "Baseline etiquette" section in `AGENTS.md` — its items are covered by the inlined Git, Security, and Testing rules.
+
 ### Added
 - Four-file orchestration: `AGENTS.md` now indexes and references `PRODUCT.md`, `DESIGN.md`, and `CODE.md`, with explicit guidance on when to read each.
 - Explicit precedence rules for resolving conflicts between instruction sources.

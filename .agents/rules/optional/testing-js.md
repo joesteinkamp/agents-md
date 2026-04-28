@@ -6,7 +6,7 @@ alwaysApply: false
 
 # JavaScript Testing Rules (optional)
 
-Enable this file by listing it under **Enabled optional rules** in `AGENTS.md`. It layers on top of `rules/testing.md` and assumes those principles apply.
+Enable this file by listing it under **Enabled optional rules** in `AGENTS.md`. It layers on top of the always-on testing rules in `AGENTS.md` and assumes those principles apply.
 
 ## Frameworks
 - Unit / integration: Jest or Vitest.
