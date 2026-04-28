@@ -1,16 +1,22 @@
+---
+description: Testing principles. Framework-agnostic.
+globs: ["**/*test*", "**/*spec*", "**/tests/**", "**/__tests__/**"]
+alwaysApply: true
+---
+
 # Testing Rules
 
-**Applies to:** `*.test.ts`, `*.spec.ts`, `/tests/*`
+## Principles
+- Test behavior and public contracts, not internal structure. Tests that mirror implementation break on refactor and provide false confidence.
+- Colocate tests with the code under test when the language and tooling permit.
+- Each new feature ships with tests covering the golden path and at least one meaningful edge case.
+- Mock external dependencies (network, filesystem, time, randomness) so tests are fast and deterministic.
 
-## 1. Frameworks
-* **Unit Tests:** Jest or Vitest
-* **E2E Tests:** Playwright or Cypress
+## Discipline
+- Run the relevant test suite before declaring a change complete. For UI changes, also exercise the feature in a running app — type-checks and unit tests verify code correctness, not feature correctness.
+- A failing test is a higher-priority signal than a passing one. Don't disable, skip, or weaken assertions to make a test pass — fix the root cause.
+- Don't add a test purely to raise coverage numbers. Each test should describe a behavior worth protecting.
 
-## 2. Guidelines
-* Ensure a test file exists alongside the implementation file it tests (e.g., `utils.ts` -> `utils.test.ts`).
-* Write tests that focus on user behavior and public API contracts, not internal implementation details.
-* Mock external dependencies and network requests to ensure tests are fast and deterministic.
-* All new features must be accompanied by relevant unit tests.
-
-## 3. Running Tests
-* Before completing a code change, run the test suite and fix any failing tests related to your changes.
+## Test data
+- Prefer factories or builders over shared fixtures that drift over time.
+- Avoid sleeps and wall-clock waits. Use fake timers or explicit synchronization.

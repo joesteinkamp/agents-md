@@ -1,13 +1,7 @@
 # CLAUDE.md
 
-For Claude Code memory behavior and conventions, see:
-https://code.claude.com/docs/en/memory
+This file is a pointer. The single source of truth is [`AGENTS.md`](./AGENTS.md).
 
-## Project Instruction Sources
+Read `AGENTS.md` first, then any relevant files under `.agents/`. If a project-local instruction conflicts with a parent rule, prefer the more specific, repo-local instruction.
 
-When working in this repository, use these as the primary instruction sources:
-
-1. `./AGENTS.md`
-2. `./.agents/` (all relevant files within this directory)
-
-If there is a conflict, prefer the most specific, repo-local instruction.
+For Claude Code memory behavior and conventions, see https://code.claude.com/docs/en/memory.

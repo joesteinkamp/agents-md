@@ -1,4 +1,12 @@
+---
+description: Fast-path skill — commit, push, create PR/MR, auto-merge. Skips review.
+trigger: "commit, push, and merge"
+risk: high
+---
+
 # Skill: Fast Commit, Push, and Auto-Merge
+
+> **Use only when the user explicitly asks for it.** This skill bypasses review and auto-merges. It is appropriate for solo work or AI-assisted prototypes; it is not appropriate for shared branches, production code, or anything touching auth, payments, or sensitive data.
 
 **Description**: The `/commit-push-merge` skill is used to commit and push changes to the repository, create a pull/merge request, and seamlessly auto-merge it. This bypasses manual reviews for AI-assisted momentum.
 
