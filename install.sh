@@ -87,4 +87,4 @@ copy_file ".github/copilot-instructions.md"
 copy_dir  ".agents"
 
 echo
-echo "Done. Edit AGENTS.md in your project to set 'Enabled optional rules' and add project-specific etiquette."
+echo "Done. Edit AGENTS.md in your project to set 'Enabled optional rules' and add project-specific rules to the always-on section."

@@ -1,13 +1,13 @@
 # `.agents/` — schema and conventions
 
-This directory holds the rules and skills that AI agents consult while working in the project. The root `AGENTS.md` is the entry point and indexes everything here.
+This directory holds glob-scoped rules, opt-in rules, and named skills. Always-on baselines (git, security, testing) live inline in the root `AGENTS.md`. Use this directory for rules that should only activate against matching files, or that callers should opt into explicitly.
 
 ## Layout
 
 ```
 .agents/
 ├── rules/
-│   ├── *.md            # default rules — apply to every project that installs the kit
+│   ├── *.md            # glob-scoped rules — extend per project
 │   └── optional/
 │       └── *.md        # opt-in rules — apply only when listed in AGENTS.md
 └── skills/
@@ -20,7 +20,7 @@ This directory holds the rules and skills that AI agents consult while working i
 | ------------ | ------------------------------------------------- | ----------------------------------------------------------- |
 | When applied | Passively, while editing matching files           | Actively, when the user invokes it by name                  |
 | Scope        | Constraint or convention (do this, don't do that) | A workflow or sequence of actions                           |
-| Example      | `testing.md` — write behavior-focused tests       | `commit-push-merge.md` — commit, push, open PR, auto-merge  |
+| Example      | `frontend-react.md` — component / styling conventions | `commit-push-merge.md` — commit, push, open PR, auto-merge  |
 
 If you find yourself describing a multi-step procedure in a rule, it probably belongs in `skills/`. If you find yourself writing constraints inside a skill, those probably belong in `rules/`.
 
@@ -34,13 +34,13 @@ Every file in `rules/` and `skills/` starts with YAML frontmatter, followed by M
 ---
 description: One-line summary of what this rule covers.
 globs: ["**/*.ts", "src/**/*"]   # paths or patterns this rule applies to
-alwaysApply: true                # true for default rules, false for optional/
+alwaysApply: false               # true loads regardless of globs; default false
 ---
 ```
 
 - `description`: short, human-readable; surfaced in tool UIs.
-- `globs`: array of paths or glob patterns. Use `["**/*"]` for project-wide rules.
-- `alwaysApply`: `true` for default rules in `rules/`; `false` for files in `rules/optional/`.
+- `globs`: array of paths or glob patterns. Project-wide concerns belong inline in `AGENTS.md` rather than as a `["**/*"]` rule file.
+- `alwaysApply`: `false` for glob-scoped and optional rules. Reserve `true` for the rare case that must load regardless of the file in scope.
 
 ### Skill frontmatter
 
@@ -62,11 +62,12 @@ risk: low | medium | high        # high if it bypasses review, force-pushes, del
 
 ## Adding a new rule
 
-1. Decide: default or optional?
-   - Default if it applies regardless of stack (security, git, generic testing principles).
-   - Optional if it presumes a specific framework, language, or tool.
-2. Create the file in the right directory with the frontmatter above.
-3. Add it to the appropriate table in the root `AGENTS.md`.
+1. Decide where it goes:
+   - **Inline in `AGENTS.md`** if it applies project-wide regardless of file (a new universal baseline).
+   - **`rules/<name>.md`** if it applies only to a subset of files (use `globs` to scope).
+   - **`rules/optional/<name>.md`** if it presumes a specific framework, language, or tool that not every project uses.
+2. For files under `.agents/`, create them with the frontmatter above.
+3. Add the file to the appropriate table in the root `AGENTS.md`.
 4. If it's optional, list it under "Available optional rules" in `AGENTS.md`.
 
 ## Adding a new skill
