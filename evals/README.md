@@ -1,80 +1,158 @@
 # Behavioral evals
 
-A minimal harness for measuring whether installing this kit changes how an
-agent behaves. The static structure of `AGENTS.md` doesn't tell you that — only
-running an agent against tasks does.
+> When a coding agent is given the AGENTS.md kit as context, do its outputs
+> actually honor the rules — and *more* than they would with a flatter rule
+> list, or with no context at all?
 
-## How it works
+This is the question daily-driving the kit cannot answer. Static lints can
+tell you `AGENTS.md` is well-formed; only running an agent against tasks can
+tell you the format is doing work.
 
-For each task, `run.sh`:
+This package is a **methodology sketch**. It runs end-to-end against
+deterministic mock agents so the harness can be self-tested before any model
+API spend, then provides a clear seam for plugging in a real model.
 
-1. Creates a fresh git repo in a tempdir.
-2. Runs the task's `setup.sh` to lay down fixture files.
-3. Optionally copies `AGENTS.md`, `CLAUDE.md`, and `.agents/` in (treatment).
-4. Invokes an agent with the task's `prompt.md`.
-5. Runs the task's `check.sh`, which prints one `PASS|FAIL\t<rule>\t<detail>`
-   line per assertion.
-6. Aggregates a control-vs-treatment scoreboard.
+## What it measures
 
-Each task is a directory under `tasks/` with three files:
+For each `(task × format × agent × rep)` cell the harness:
 
-| File         | Purpose                                                  |
-| ------------ | -------------------------------------------------------- |
-| `prompt.md`  | The user instruction the agent sees. Phrase it like a real dev task — don't tip the agent off that it's being tested. |
-| `setup.sh`   | Runs in the empty sandbox repo; lays down fixture files. |
-| `check.sh`   | Runs in the sandbox after the agent finishes; uses helpers from `lib/check.sh` to emit pass/fail lines. |
+1. Creates a fresh sandbox git repo and runs the task's `setup.sh`.
+2. Installs context in one of three formats (the A/B/C):
+   - **`agentsmd`** — the full kit: `AGENTS.md` + `CLAUDE.md` + `.agents/`. The treatment.
+   - **`flat`** — just the always-on rules as a single `RULES.md`, no four-file scaffolding (control: "is the structure doing work, or any rules?").
+   - **`none`** — empty (control: "would the agent do this anyway?").
+3. Records `BASELINE_REF`, then invokes the agent against `prompt.md`.
+4. Runs `check.sh` in the sandbox, scoring rule adherence by counting
+   `PASS` / `FAIL` lines.
 
-## Usage
+Aggregating across cells gives a pass-rate per format. **The hypothesis is
+that `agentsmd` ≫ `none`, and ≥ `flat`.** If it isn't, the four-file
+structure isn't earning its keep over a flat rule list — which is the only
+thing daily-driving cannot tell you.
 
-```sh
-# Run every task, both arms, with Claude Code as the agent.
-evals/run.sh
+## What it does not measure (yet)
 
-# Just one task, treatment only.
-evals/run.sh --mode=treatment branch-naming
+- **Conversational behavior** — only end-state in the git repo. Things like
+  "the agent asked a clarifying question first" need a different setup.
+- **Realistic prompts.** Tasks are short and synthetic. Production prompts
+  have ambient context that may interact with the rules in ways we don't see.
+- **Cross-model.** Built-in support is for Claude (`claude -p`) and the mock
+  agents. Cursor / Copilot / Codex would each need a small adapter shim.
 
-# Bring your own agent. {prompt_file} is substituted with the prompt path.
-AGENT_CMD='cursor-agent --prompt-file {prompt_file}' evals/run.sh
+## Anatomy
 
-# Drive the agent by hand — the runner pauses so you can do the work yourself.
-AGENT_CMD=manual evals/run.sh secret-handling
+```
+evals/
+├── run.sh                  # the runner
+├── lib/
+│   ├── check.sh            # assertion helpers used by check.sh scripts
+│   └── format.sh           # builds context for a given format
+├── agents/
+│   ├── mock-instruction-follower.sh   # passes when rules are visible
+│   └── mock-chaotic.sh                # ignores rules, fails everything
+└── tasks/
+    ├── branch-naming/      # one rule from AGENTS.md per task
+    ├── secret-handling/
+    └── commit-subject/
 ```
 
-The default `AGENT_CMD` invokes `claude -p` in headless mode with permissions
-bypassed. Real runs cost API spend; the manual mode is free and useful for
-sanity-checking new tasks.
+Each task is `prompt.md` (the instruction the agent sees), `setup.sh` (lays
+down fixture files), and `check.sh` (emits one `PASS|FAIL\t<rule>\t<detail>`
+line per assertion).
+
+## How to run
+
+```sh
+# All tasks × all formats × both mocks, one rep each.
+evals/run.sh
+
+# Just one task, just the treatment, one mock.
+evals/run.sh --format=agentsmd --agent=mock-instruction-follower commit-subject
+
+# Three reps per cell, JSON report for later analysis.
+evals/run.sh --reps=3 --out=reports/2026-05-02.json
+
+# Run against the real model. Costs API spend.
+evals/run.sh --agent=claude --reps=5
+```
+
+## Built-in agents
+
+- **`mock-instruction-follower`** — checks whether any rules file is visible
+  in the sandbox. If yes, performs the task in a rule-following way (named
+  branch, env-based credentials, imperative commit subject). If no, falls
+  back to default sloppy behavior. **This is the harness self-test:** with
+  this agent, `agentsmd` and `flat` should score high, `none` lower. If
+  they don't, the scorer is broken.
+- **`mock-chaotic`** — ignores context and does the wrong thing every time
+  (commits to main, hardcodes secrets, sloppy commit subjects). Should
+  score near zero on every format. Sanity check that the scorer actually
+  penalizes wrong outputs.
+- **`claude`** — invokes `claude -p ... --permission-mode bypassPermissions`.
+  This is the real measurement; the mocks are the harness self-test.
 
 ## Reading the scoreboard
 
 ```
-Task                      Control     Treatment
-branch-naming             1/4         4/4
-secret-handling           1/4         4/4
-commit-subject            2/5         5/5
-TOTAL                     4/13        13/13
+Task / Agent                                agentsmd      flat          none
+branch-naming / mock-instruction-follower   4/4           4/4           2/4
+branch-naming / mock-chaotic                2/4           2/4           2/4
+...
+TOTAL by format                             20/28         20/28         14/28
 ```
 
-The signal you're looking for is `treatment > control`. If the kit makes no
-difference, both columns will look the same and the kit isn't paying for its
-context budget. If control already passes, the rule is something the model
-does anyway and doesn't need to be in `AGENTS.md`.
+Look for two signals:
+
+1. **`agentsmd` > `none`** — the kit is doing *something*.
+2. **`agentsmd` > `flat`** — the *structure* is doing something beyond just
+   making the rules visible. If they're equal, a flat rule list is just as
+   good and the four-file scaffolding isn't paying for its complexity.
+
+The mock agents will not separate `agentsmd` from `flat` — they only check
+"any rules visible." That separation is what the real-model run is for.
+
+## Output shape
+
+The `--out PATH` flag writes a JSON report:
+
+```json
+{
+  "startedAt": "2026-05-02T12:00:00Z",
+  "runs": [
+    {
+      "task": "commit-subject",
+      "format": "agentsmd",
+      "agent": "mock-instruction-follower",
+      "rep": 1,
+      "passed": 6,
+      "total": 6,
+      "assertions": [
+        { "status": "PASS", "name": "agent made a commit", "detail": "" },
+        ...
+      ]
+    }
+  ]
+}
+```
+
+Diff `runs` across reports to detect regressions in the kit itself (e.g. a
+spec change that makes agents *less* likely to honor rules).
 
 ## Adding a task
 
 1. Pick one rule from `AGENTS.md` that should change observable behavior.
-2. Write a prompt that creates the *opportunity* to violate it without
+2. Write a `prompt.md` that creates the *opportunity* to violate it without
    mentioning the rule.
-3. Write checks that pass only when the rule is followed. Avoid checks that
-   pass for the wrong reason (e.g. "branch is not main" passes if the agent
-   does nothing — pair it with "feature was implemented").
-4. Run `AGENT_CMD=manual evals/run.sh <task>` and play both sides yourself to
-   make sure the checks fire correctly.
+3. Write `setup.sh` to create the starting state.
+4. Write `check.sh` using helpers from `lib/check.sh`. Pair every "absence"
+   check with a "feature implemented" check so a no-op agent fails cleanly.
+5. Calibrate by running both mocks against it — the rule-follower should
+   pass, the chaotic agent should fail.
 
 ## Limits
 
-- Three tasks is a smoke test, not a benchmark. Aim for 15–25 to get past
-  per-run noise.
-- Each task is one sample. To distinguish a real effect from variance, run
-  each arm N times (loop the runner) and compare distributions.
-- The harness only catches behaviors observable in the resulting git state.
-  Things like "the agent asked a clarifying question" need a different setup.
+- Three tasks × two mocks is a smoke test, not a benchmark. Aim for 15–25
+  tasks before trusting totals.
+- One run per cell is noisy. Use `--reps=N` (5–10) and compare distributions.
+- The mocks only differentiate "any rules / no rules." They can't tell you
+  whether `agentsmd` beats `flat` — only a real model can.
