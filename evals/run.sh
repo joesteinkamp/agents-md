@@ -1,51 +1,87 @@
 #!/usr/bin/env bash
 # Behavioral eval harness for the AGENTS.md kit.
 #
-# For each task, spins up a fresh sandbox repo, optionally installs the kit,
-# invokes an agent against the task prompt, then scores rule adherence using
-# the task's check.sh.
+# Iterates (task × format × agent × rep) cells. Each cell:
+#   1. Creates a fresh sandbox repo and runs the task's setup.sh.
+#   2. Installs context for the format (full kit / flat rules / nothing).
+#   3. Records BASELINE_REF, then invokes the agent against prompt.md.
+#   4. Runs check.sh to score rule adherence.
 #
-# Usage: evals/run.sh [--mode=control|treatment|both] [task ...]
+# Aggregates pass/total by format×agent so you can answer the sharper
+# question — does the structured kit do *better* than a flat rule list, not
+# just better than no context at all?
 #
-# Override the agent invocation with AGENT_CMD. The placeholder {prompt_file}
-# is replaced with the path to a file containing the prompt. Examples:
-#   AGENT_CMD='claude -p "$(cat {prompt_file})" --permission-mode bypassPermissions'
-#   AGENT_CMD='cursor-agent --prompt-file {prompt_file}'
-#   AGENT_CMD='manual'   # pause and let a human drive the sandbox
+# Usage:
+#   evals/run.sh [--format=<f>[,<f>...]] [--agent=<id>[,<id>...]]
+#                [--reps=N] [--out=PATH] [task ...]
+#
+# Defaults run every task × format × agent once. Built-in agents:
+#   mock-instruction-follower — passes when rules are visible (self-test)
+#   mock-chaotic              — fails everything (sanity check on the scorer)
+#   claude                    — invokes `claude -p` (real run, costs API spend)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EVAL_DIR="$REPO_ROOT/evals"
 TASKS_DIR="$EVAL_DIR/tasks"
-AGENT_CMD="${AGENT_CMD:-claude -p \"\$(cat {prompt_file})\" --permission-mode bypassPermissions}"
+AGENTS_DIR="$EVAL_DIR/agents"
+. "$EVAL_DIR/lib/format.sh"
 
-usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
-}
+DEFAULT_FORMATS=(agentsmd flat none)
+DEFAULT_AGENTS=(mock-instruction-follower mock-chaotic)
 
-MODE=both
-TASKS=()
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
+
+FORMATS=() AGENTS=() TASKS=() REPS=1 OUT=""
 for arg in "$@"; do
   case "$arg" in
-    --mode=*) MODE="${arg#*=}" ;;
-    -h|--help) usage; exit 0 ;;
-    *) TASKS+=("$arg") ;;
+    --format=*)  IFS=, read -r -a FORMATS <<<"${arg#*=}" ;;
+    --agent=*)   IFS=, read -r -a AGENTS  <<<"${arg#*=}" ;;
+    --reps=*)    REPS="${arg#*=}" ;;
+    --out=*)     OUT="${arg#*=}" ;;
+    -h|--help)   usage; exit 0 ;;
+    *)           TASKS+=("$arg") ;;
   esac
 done
 
+[ ${#FORMATS[@]} -eq 0 ] && FORMATS=("${DEFAULT_FORMATS[@]}")
+[ ${#AGENTS[@]}  -eq 0 ] && AGENTS=("${DEFAULT_AGENTS[@]}")
 if [ ${#TASKS[@]} -eq 0 ]; then
-  for d in "$TASKS_DIR"/*/; do
-    TASKS+=("$(basename "$d")")
-  done
+  for d in "$TASKS_DIR"/*/; do TASKS+=("$(basename "$d")"); done
 fi
 
-# Run one task in a fresh sandbox. Echoes "<pass>/<total>" to stdout; logs
-# the per-assertion detail to stderr.
-run_task() {
-  local task="$1" install_kit="$2"
+# JSON-escape a string for embedding in a JSON literal.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"; s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+invoke_agent() {
+  local agent_id="$1" prompt_file="$2"
+  case "$agent_id" in
+    mock-*)
+      bash "$AGENTS_DIR/$agent_id.sh" "$prompt_file"
+      ;;
+    claude)
+      claude -p "$(cat "$prompt_file")" --permission-mode bypassPermissions
+      ;;
+    custom)
+      eval "${AGENT_CMD:?AGENT_CMD required for agent=custom}"
+      ;;
+    *)
+      echo "invoke_agent: unknown agent '$agent_id'" >&2; return 1 ;;
+  esac
+}
+
+# Run one (task, format, agent) cell. Echoes a JSON object on stdout.
+run_cell() {
+  local task="$1" format="$2" agent_id="$3" rep="$4"
   local task_dir="$TASKS_DIR/$task"
   local sandbox; sandbox=$(mktemp -d)
   local prompt_file="$sandbox/.eval-prompt"
+  local results="$sandbox/.eval-results"
 
   (
     cd "$sandbox"
@@ -55,72 +91,94 @@ run_task() {
     git config commit.gpgsign false
 
     bash "$task_dir/setup.sh"
-    if [ -n "$(git status --porcelain)" ]; then
-      git add -A && git commit -q -m "Initial fixture"
-    fi
+    [ -n "$(git status --porcelain)" ] && git add -A && git commit -q -m "Initial fixture"
 
-    if [ "$install_kit" = "1" ]; then
-      cp "$REPO_ROOT/AGENTS.md" .
-      cp "$REPO_ROOT/CLAUDE.md" .
-      cp -r "$REPO_ROOT/.agents" .
-      git add -A && git commit -q -m "Install AGENTS.md kit"
-    fi
+    build_format "$format" "$sandbox" "$REPO_ROOT"
+    [ -n "$(git status --porcelain)" ] && git add -A && git commit -q -m "Install context: $format"
 
     cp "$task_dir/prompt.md" "$prompt_file"
-    git rev-parse HEAD >"$sandbox/.eval-baseline" 2>/dev/null || echo "" >"$sandbox/.eval-baseline"
+    git rev-parse HEAD > "$sandbox/.eval-baseline"
 
-    if [ "$AGENT_CMD" = "manual" ]; then
-      echo "[$task / kit=$install_kit] sandbox: $sandbox" >&2
-      echo "Drive the agent against $prompt_file, then press enter to score." >&2
-      read -r _
-    else
-      eval "$AGENT_CMD" >"$sandbox/.eval-agent.log" 2>&1 || true
-    fi
+    invoke_agent "$agent_id" "$prompt_file" > "$sandbox/.eval-agent.log" 2>&1 || true
   )
 
-  # Score in the sandbox. BASELINE_REF lets checks distinguish agent commits
-  # from the harness's setup commits.
   ( cd "$sandbox" && SANDBOX="$sandbox" \
       BASELINE_REF="$(cat "$sandbox/.eval-baseline")" \
-      bash "$task_dir/check.sh" ) \
-    | tee "$sandbox/.eval-results" >&2
+      bash "$task_dir/check.sh" ) > "$results" 2>/dev/null || true
 
-  awk -F'\t' '$1=="PASS"{p++} $1!=""{t++} END{printf "%d/%d", p+0, t+0}' \
-    "$sandbox/.eval-results"
+  local passed total assertions_json="" first=1
+  passed=$(awk -F'\t' '$1=="PASS"{p++} END{print p+0}' "$results")
+  total=$(awk -F'\t' 'NF>=2{t++}    END{print t+0}' "$results")
+
+  while IFS=$'\t' read -r status name detail; do
+    [ -z "${status:-}" ] && continue
+    [ $first -eq 1 ] && first=0 || assertions_json+=","
+    assertions_json+="{\"status\":\"$(json_escape "$status")\",\"name\":\"$(json_escape "$name")\",\"detail\":\"$(json_escape "${detail:-}")\"}"
+  done < "$results"
+
+  printf '{"task":"%s","format":"%s","agent":"%s","rep":%d,"passed":%d,"total":%d,"assertions":[%s]}' \
+    "$(json_escape "$task")" "$(json_escape "$format")" "$(json_escape "$agent_id")" \
+    "$rep" "$passed" "$total" "$assertions_json"
+
+  echo "[$task / $format / $agent_id / rep=$rep] $passed/$total" >&2
+  rm -rf "$sandbox"
 }
 
-declare -A CONTROL_SCORE TREATMENT_SCORE
-total_control_pass=0; total_control=0
-total_treatment_pass=0; total_treatment=0
-
+# Drive all cells, collecting JSON.
+runs_json=""; first=1
 for task in "${TASKS[@]}"; do
-  if [ ! -d "$TASKS_DIR/$task" ]; then
-    echo "skip: no such task '$task'" >&2
-    continue
-  fi
-  if [ "$MODE" = "control" ] || [ "$MODE" = "both" ]; then
-    echo "=== $task (control) ===" >&2
-    score=$(run_task "$task" 0)
-    CONTROL_SCORE[$task]=$score
-    total_control_pass=$(( total_control_pass + ${score%/*} ))
-    total_control=$(( total_control + ${score#*/} ))
-  fi
-  if [ "$MODE" = "treatment" ] || [ "$MODE" = "both" ]; then
-    echo "=== $task (treatment) ===" >&2
-    score=$(run_task "$task" 1)
-    TREATMENT_SCORE[$task]=$score
-    total_treatment_pass=$(( total_treatment_pass + ${score%/*} ))
-    total_treatment=$(( total_treatment + ${score#*/} ))
-  fi
+  [ -d "$TASKS_DIR/$task" ] || { echo "skip: no such task '$task'" >&2; continue; }
+  for format in "${FORMATS[@]}"; do
+    for agent in "${AGENTS[@]}"; do
+      for rep in $(seq 1 "$REPS"); do
+        cell_json=$(run_cell "$task" "$format" "$agent" "$rep")
+        [ $first -eq 1 ] && first=0 || runs_json+=","
+        runs_json+="$cell_json"
+      done
+    done
+  done
 done
 
-printf '\n%-24s  %-10s  %-10s\n' "Task" "Control" "Treatment"
-printf '%-24s  %-10s  %-10s\n' "----" "-------" "---------"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+report="{\"startedAt\":\"$started_at\",\"runs\":[$runs_json]}"
+
+# Aggregate by (format, agent): mean pass-rate.
+echo "" >&2
+printf '%-32s' "Task / Agent" >&2
+for format in "${FORMATS[@]}"; do printf '  %-12s' "$format" >&2; done
+echo "" >&2
 for task in "${TASKS[@]}"; do
-  printf '%-24s  %-10s  %-10s\n' "$task" \
-    "${CONTROL_SCORE[$task]:--}" "${TREATMENT_SCORE[$task]:--}"
+  for agent in "${AGENTS[@]}"; do
+    printf '%-32s' "$task / $agent" >&2
+    for format in "${FORMATS[@]}"; do
+      sum=$(printf '%s' "$report" | python3 -c "
+import json, sys
+r = json.loads(sys.stdin.read())['runs']
+cells = [c for c in r if c['task']=='$task' and c['format']=='$format' and c['agent']=='$agent']
+p = sum(c['passed'] for c in cells); t = sum(c['total'] for c in cells)
+print(f'{p}/{t}' if t else '-')
+")
+      printf '  %-12s' "$sum" >&2
+    done
+    echo "" >&2
+  done
 done
-printf '%-24s  %-10s  %-10s\n' "----" "-------" "---------"
-printf '%-24s  %-10s  %-10s\n' "TOTAL" \
-  "${total_control_pass}/${total_control}" \
-  "${total_treatment_pass}/${total_treatment}"
+echo "" >&2
+printf '%-32s' "TOTAL by format" >&2
+for format in "${FORMATS[@]}"; do
+  sum=$(printf '%s' "$report" | python3 -c "
+import json, sys
+r = json.loads(sys.stdin.read())['runs']
+cells = [c for c in r if c['format']=='$format']
+p = sum(c['passed'] for c in cells); t = sum(c['total'] for c in cells)
+print(f'{p}/{t}' if t else '-')
+")
+  printf '  %-12s' "$sum" >&2
+done
+echo "" >&2
+
+if [ -n "$OUT" ]; then
+  mkdir -p "$(dirname "$OUT")"
+  printf '%s\n' "$report" | python3 -m json.tool > "$OUT"
+  echo "Wrote ${OUT}" >&2
+fi
