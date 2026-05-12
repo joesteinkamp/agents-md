@@ -23,6 +23,13 @@ build_format() {
         /^## / && flag         { flag=0 }
         flag                   { print }
       ' "$repo_root/AGENTS.md" > "$sandbox/RULES.md"
+      # Fail loudly if the header is missing or the section is empty — otherwise
+      # the `flat` control would silently degrade into the `none` control.
+      if [ ! -s "$sandbox/RULES.md" ]; then
+        echo "build_format: '## Always-on rules' section missing or empty in $repo_root/AGENTS.md" >&2
+        rm -f "$sandbox/RULES.md"
+        return 1
+      fi
       ;;
     none)
       : # nothing
