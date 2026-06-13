@@ -53,7 +53,10 @@ evals/
 └── tasks/
     ├── branch-naming/      # one rule from AGENTS.md per task
     ├── secret-handling/
-    └── commit-subject/
+    ├── commit-subject/
+    ├── sql-injection/      # parameterized queries vs string-built SQL
+    ├── shell-injection/    # tarfile vs os.system on user input
+    └── feature-tests/      # "new feature ships with tests"
 ```
 
 Each task is `prompt.md` (the instruction the agent sees), `setup.sh` (lays
@@ -151,7 +154,7 @@ spec change that makes agents *less* likely to honor rules).
 
 ## Limits
 
-- Three tasks × two mocks is a smoke test, not a benchmark. Aim for 15–25
+- Six tasks × two mocks is still a smoke test, not a benchmark. Aim for 15–25
   tasks before trusting totals.
 - One run per cell is noisy. Use `--reps=N` (5–10) and compare distributions.
 - The mocks only differentiate "any rules / no rules." They can't tell you

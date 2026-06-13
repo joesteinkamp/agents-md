@@ -66,3 +66,12 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for history.
 ## Adding rules and skills
 
 See [`.agents/README.md`](./.agents/README.md) for the file schema (frontmatter, sections, glob conventions).
+
+## Tests
+
+This repo has two test suites:
+
+- `tests/run.sh` — unit tests for the kit's own shell code (`install.sh`, the eval helpers, pointer-file freshness). Fast and deterministic, no API spend.
+- `evals/run.sh` — behavioral evals that run mock or real agents against tasks and score rule adherence. See [`evals/README.md`](./evals/README.md).
+
+Run both before opening a PR.
